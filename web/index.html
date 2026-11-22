@@ -27,18 +27,21 @@ canvas{background:#000;border-radius:8px;max-width:100%}
 <header><b>LILA BLACK · PLAYER JOURNEYS</b><div class="tabs" id="tabs"></div><span class="note" id="status"></span></header>
 <aside>
   <section><h3>Filter</h3>
-    <select id="day"></select><div style="height:6px"></div><select id="match"></select>
+    <select id="day"></select><div style="height:6px"></div><select id="mf"><option value="">Any kind of match</option><option value="bots">Only matches with bot paths</option><option value="storm">Only matches with a storm death</option><option value="kills">Only matches with kills</option></select><div style="height:6px"></div><select id="match"></select>
     <div class="note" style="margin-top:6px" id="matchNote"></div></section>
   <section><h3>Show</h3>
+    <label><input type="checkbox" id="showH" checked><span class="sw" style="background:var(--human);border-radius:50%"></span> Humans</label>
+    <label><input type="checkbox" id="showB" checked><span class="sw" style="background:var(--bot)"></span> Bots</label>
     <label><input type="checkbox" id="paths" checked> Paths</label>
     <label><input type="checkbox" id="e0" checked><span class="sw" style="color:#ff4d4d">⊕</span> Kills</label>
-    <label><input type="checkbox" id="e1" checked><span class="sw" style="color:#fff">✕</span> Deaths (by player / bot)</label>
+    <label><input type="checkbox" id="e1" checked><span class="sw" style="color:#fff">✕</span> Deaths</label>
     <label><input type="checkbox" id="e4" checked><span class="sw" style="color:#c26bff">ϟ</span> Storm deaths</label>
     <label><input type="checkbox" id="e5"><span class="sw" style="color:#ffd24d">◆</span> Loot</label></section>
   <section><h3>Heatmap</h3>
-    <select id="heat"><option value="">Off</option><option value="traffic">Traffic (where players walk)</option><option value="kills">Kill zones</option><option value="deaths">Death zones</option></select>
+    <select id="heat"><option value="">Off</option><option value="traffic">Traffic (where players walk)</option><option value="kills">Kill zones</option><option value="deaths">Death zones</option><option value="cold">Cold zones (ignored areas)</option></select>
     <div style="height:6px"></div>
-    <select id="scope"><option value="sel">Current filter (map + day + match)</option><option value="all">All matches on this map</option></select></section>
+    <select id="scope"><option value="sel">Current filter (map + day + match)</option><option value="all">All matches on this map</option></select>
+    <div class="note" id="hleg" style="display:none;margin-top:8px"></div></section>
   <section><h3>Legend</h3>
     <label><span class="sw" style="background:var(--human);border-radius:50%"></span> Human — solid line</label>
     <label><span class="sw" style="background:var(--bot)"></span> Bot — dashed line</label></section>
@@ -64,11 +67,11 @@ async function loadMap(m){
   fillMatches(); document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.m==m));
   $("status").textContent=S.data.matches.length+" matches · "+NAMES[m]; update(true);
 }
-const counts=m=>({h:m.players.filter(p=>!p.bot).length,b:m.players.filter(p=>p.bot).length,k:m.ev.filter(e=>e[1]==0||e[1]==2).length,d:m.ev.filter(e=>e[1]==1||e[1]==3||e[1]==4).length});
-function visibleMatches(){return S.data.matches.filter(m=>!S.day||m.day==S.day)}
+const counts=m=>({h:m.players.filter(p=>!p.bot).length,b:m.players.filter(p=>p.bot).length,k:m.ev.filter(e=>!e[5]&&(e[1]==0||e[1]==2)).length,d:m.ev.filter(e=>!e[5]&&[1,3,4].includes(e[1])).length});
+function visibleMatches(){const f=$("mf").value;return S.data.matches.filter(m=>(!S.day||m.day==S.day)&&(!f||(f=="bots"?m.players.some(p=>p.bot):f=="storm"?m.ev.some(e=>e[1]==4):m.ev.some(e=>e[1]==0||e[1]==2))))}
 function fillMatches(){
   const ms=visibleMatches();
-  $("match").innerHTML=`<option value="">All matches (${ms.length})</option>`+ms.map(m=>{const c=counts(m);return `<option value="${m.id}">${m.day} · ${fmt(m.dur)} · ${c.h}H ${c.b}B · ${c.k}K ${c.d}D · #${m.id}</option>`}).join("");
+  $("match").innerHTML=`<option value="">All matches (${ms.length})</option>`+ms.map(m=>{const c=counts(m);return `<option value="${m.id}">${m.day} · ${fmt(m.dur)} · ${c.b?c.b+" bots tracked":"no bot paths"} · ${c.k} kills · ${c.d} deaths</option>`}).join("");
   const first=ms.find(m=>m.players.some(p=>p.bot))||ms[0]; S.match=first?first.id:""; $("match").value=S.match;
 }
 function selMatches(){const ms=visibleMatches();return S.match?ms.filter(m=>m.id==S.match):ms}
@@ -82,9 +85,8 @@ function update(resetT){
   S.heatKey=""; draw(); stats();
 }
 function stats(){
-  const ms=selMatches(), ev=ms.flatMap(m=>m.ev), n=t=>ev.filter(e=>t.includes(e[1])).length;
-  const h=ms.reduce((a,m)=>a+m.players.filter(p=>!p.bot).length,0), b=ms.reduce((a,m)=>a+m.players.filter(p=>p.bot).length,0);
-  $("stats").innerHTML=[[ms.length,"matches"],[h,"humans"],[b,"bots tracked"],[n([0,2]),"kills"],[n([1,3]),"deaths"],[n([4]),"storm deaths"]].map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join("");
+  const ms=selMatches(),H=$("showH").checked,B=$("showB").checked,ev=ms.flatMap(m=>m.ev).filter(e=>e[5]?B:H),n=t=>ev.filter(e=>!e[5]&&t.includes(e[1])).length;
+  $("stats").innerHTML=[[ms.length,"matches"],[n([2]),"bots killed by humans"],[n([3]),"humans killed by bots"],[n([4]),"storm deaths"],[n([0]),"PvP kills (human vs human)"],[n([5]),"items looted"]].map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join("");
 }
 function resize(){const st=$("stage"),s=Math.max(300,Math.min(st.clientWidth-16,st.clientHeight-16));S.size=s;const d=devicePixelRatio||1;cv.width=cv.height=s*d;cv.style.width=cv.style.height=s+"px";ctx.setTransform(d,0,0,d,0,0);S.heatKey="";draw()}
 
@@ -92,14 +94,24 @@ function resize(){const st=$("stage"),s=Math.max(300,Math.min(st.clientWidth-16,
 const sprite=(()=>{const c=document.createElement("canvas");c.width=c.height=64;const g=c.getContext("2d"),gr=g.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,"rgba(0,0,0,1)");gr.addColorStop(1,"rgba(0,0,0,0)");g.fillStyle=gr;g.fillRect(0,0,64,64);return c})();
 const ramp=(()=>{const c=document.createElement("canvas");c.width=256;c.height=1;const g=c.getContext("2d"),gr=g.createLinearGradient(0,0,256,0);[[0,"rgba(30,60,255,0)"],[.25,"rgba(40,160,255,.75)"],[.5,"rgba(60,230,120,.85)"],[.75,"rgba(255,220,40,.92)"],[1,"rgba(255,50,40,1)"]].forEach(([o,col])=>gr.addColorStop(o,col));g.fillStyle=gr;g.fillRect(0,0,256,1);return g.getImageData(0,0,256,1).data})();
 function heatPoints(kind){
-  const pts=[];for(const m of (($("scope").value=="all")?visibleMatches():selMatches())){
-    if(kind=="traffic"){for(const p of m.players)for(let i=0;i<p.pts.length;i+=3)pts.push(p.pts[i+1],p.pts[i+2])}
-    else for(const e of m.ev)if(kind=="kills"?(e[1]==0||e[1]==2):(e[1]==1||e[1]==3||e[1]==4))pts.push(e[2],e[3])}
+  const pts=[],H=$("showH").checked,B=$("showB").checked,k=kind=="cold"?"traffic":kind;
+  for(const m of (($("scope").value=="all")?visibleMatches():selMatches())){
+    if(k=="traffic"){for(const p of m.players)if(p.bot?B:H)for(let i=0;i<p.pts.length;i+=3)pts.push(p.pts[i+1],p.pts[i+2])}
+    else for(const e of m.ev)if((e[5]?B:H)&&(k=="kills"?(e[1]==0||e[1]==2):(e[1]==1||e[1]==3||e[1]==4)))pts.push(e[2],e[3])}
   return pts}
+const LEG={traffic:"Foot traffic (humans + bots)",kills:"Kills",deaths:"Deaths incl. storm"};
+function legend(kind){const h=$("hleg");h.style.display=kind?"block":"none";if(!kind)return;
+  h.innerHTML=kind=="cold"?'<span class="sw" style="background:rgb(190,80,255);width:28px;height:10px"></span> Playable area with almost no visits':'<div style="height:8px;border-radius:4px;background:linear-gradient(90deg,#1e3cff,#28a0ff,#3ce678,#ffdc28,#ff3228)"></div><div style="display:flex;justify-content:space-between"><span>Low</span><span>High</span></div>'+LEG[kind]}
+function coldMap(g,pts,s){
+  const N=64,cnt=new Array(N*N).fill(0),l=document.createElement("canvas");l.width=l.height=N;const lg=l.getContext("2d");lg.drawImage(S.img,0,0,N,N);const px=lg.getImageData(0,0,N,N).data;
+  for(let i=0;i<pts.length;i+=2)cnt[Math.min(N-1,pts[i+1]/Q*N|0)*N+Math.min(N-1,pts[i]/Q*N|0)]++;
+  const near=(r,c)=>{let t=0;for(let i=-3;i<=3;i++)for(let j=-3;j<=3;j++){const y=r+i,x=c+j;if(y>=0&&x>=0&&y<N&&x<N&&cnt[y*N+x]>0)t++}return t},nz=cnt.filter(v=>v>0).sort((a,b)=>a-b),thr=.1*(nz[nz.length>>1]||1);g.fillStyle="rgba(190,80,255,.55)";
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){const j=(r*N+c)*4,lum=.3*px[j]+.6*px[j+1]+.1*px[j+2];if(lum>42&&cnt[r*N+c]<=thr&&near(r,c)>=16)g.fillRect(c*s/N,r*s/N,s/N+.5,s/N+.5)}}
 function heatCanvas(){
-  const kind=$("heat").value; if(!kind)return null;
-  const key=[S.map,S.day,S.match,kind,$("scope").value,S.size].join("|"); if(S.heatKey==key)return S.heat;
+  const kind=$("heat").value;legend(kind);if(!kind)return null;
+  const key=[S.map,S.day,S.match,kind,$("scope").value,S.size,$("showH").checked,$("showB").checked,$("mf").value].join("|"); if(S.heatKey==key)return S.heat;
   const s=S.size,c=document.createElement("canvas");c.width=c.height=s;const g=c.getContext("2d"),pts=heatPoints(kind),r=s*(kind=="traffic"?.02:.035);
+  if(kind=="cold"){coldMap(g,pts,s);S.heat=c;S.heatKey=key;return c}
   g.globalAlpha=Math.min(.5,Math.max(.06,40/Math.sqrt(pts.length+1)*.1));
   for(let i=0;i<pts.length;i+=2)g.drawImage(sprite,pts[i]/Q*s-r,pts[i+1]/Q*s-r,2*r,2*r);
   const im=g.getImageData(0,0,s,s),d=im.data;let mx=1;for(let i=3;i<d.length;i+=4)if(d[i]>mx)mx=d[i];
@@ -113,7 +125,7 @@ function draw(){
   const hc=heatCanvas(),agg=hc&&all;if(hc){ctx.fillStyle="#0007";ctx.fillRect(0,0,s,s);ctx.drawImage(hc,0,0,s,s)}
   const P=v=>v/Q*s;
   ctx.globalAlpha=agg?.25:1;if($("paths").checked){
-    for(const mm of selMatches())for(const p of mm.players){
+    for(const mm of selMatches())for(const p of mm.players){if(!(p.bot?$("showB").checked:$("showH").checked))continue;
       ctx.beginPath();ctx.setLineDash(p.bot?[6,4]:[]);ctx.lineWidth=all?1:p.bot?1.6:2.4;
       ctx.strokeStyle=p.bot?(all?"rgba(255,176,46,.28)":"rgba(255,176,46,.85)"):(all?"rgba(53,224,255,.28)":"rgba(53,224,255,.95)");
       let started=false,last=null;
@@ -123,7 +135,7 @@ function draw(){
         p.bot?(ctx.fillRect(last[0]-4,last[1]-4,8,8),ctx.strokeRect(last[0]-4,last[1]-4,8,8)):(ctx.beginPath(),ctx.arc(last[0],last[1],5,0,7),ctx.fill(),ctx.stroke())}}}
   ctx.globalAlpha=1;S.hit=[];const sz=all?3.5:7;
   for(const mm of agg?[]:selMatches())for(const e of mm.ev){
-    const [t,k,a,b]=e;if(t>T||!$("e"+(k==2?0:k==3?1:k)).checked)continue;const x=P(a),y=P(b);S.hit.push([x,y,e]);
+    const [t,k,a,b]=e;if(t>T||!$("e"+(k==2?0:k==3?1:k)).checked||!(e[5]?$("showB").checked:$("showH").checked))continue;const x=P(a),y=P(b);S.hit.push([x,y,e]);
     ctx.lineWidth=all?1.2:2;
     if(k==0||k==2){ctx.strokeStyle="#ff4d4d";ctx.beginPath();ctx.arc(x,y,sz,0,7);ctx.moveTo(x-sz-2,y);ctx.lineTo(x+sz+2,y);ctx.moveTo(x,y-sz-2);ctx.lineTo(x,y+sz+2);ctx.stroke()}
     else if(k==1||k==3){ctx.strokeStyle="#fff";ctx.beginPath();ctx.moveTo(x-sz,y-sz);ctx.lineTo(x+sz,y+sz);ctx.moveTo(x+sz,y-sz);ctx.lineTo(x-sz,y+sz);ctx.stroke()}
@@ -144,7 +156,8 @@ $("tabs").innerHTML=MAPS.map(m=>`<button data-m="${m}">${NAMES[m]}</button>`).jo
 $("tabs").onclick=e=>e.target.dataset.m&&loadMap(e.target.dataset.m);
 $("day").onchange=e=>{S.day=e.target.value;fillMatches();update(true)};
 $("match").onchange=e=>{S.match=e.target.value;update(true)};
-["paths","e0","e1","e4","e5","heat","scope"].forEach(id=>$(id).onchange=()=>{S.heatKey="";draw()});
+["paths","e0","e1","e4","e5","heat","scope","showH","showB"].forEach(id=>$(id).onchange=()=>{S.heatKey="";draw();stats()});
+$("mf").onchange=()=>{fillMatches();update(true)};
 $("scrub").oninput=e=>{S.T=+e.target.value;draw()};
 $("play").onclick=()=>{const m=single();if(!m)return;if(S.T>=m.dur)S.T=0;S.playing=!S.playing;$("play").textContent=S.playing?"❚❚ Pause":"▶ Play"};
 let prev=0;(function tick(t){const m=single();if(S.playing&&m){S.T=Math.min(m.dur,S.T+(t-prev)/1000*$("speed").value);$("scrub").value=S.T;if(S.T>=m.dur){S.playing=false;$("play").textContent="▶ Play"}draw()}prev=t;requestAnimationFrame(tick)})(0);
