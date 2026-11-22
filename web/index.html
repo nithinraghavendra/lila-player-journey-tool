@@ -36,7 +36,8 @@ canvas{background:#000;border-radius:8px;max-width:100%}
     <label><input type="checkbox" id="e0" checked><span class="sw" style="color:#ff4d4d">⊕</span> Kills</label>
     <label><input type="checkbox" id="e1" checked><span class="sw" style="color:#fff">✕</span> Deaths</label>
     <label><input type="checkbox" id="e4" checked><span class="sw" style="color:#c26bff">ϟ</span> Storm deaths</label>
-    <label><input type="checkbox" id="e5"><span class="sw" style="color:#ffd24d">◆</span> Loot</label></section>
+    <label><input type="checkbox" id="e5"><span class="sw" style="color:#ffd24d">◆</span> Loot</label>
+    <label><input type="checkbox" id="grid"><span class="sw">▦</span> Grid (A1–H8)</label></section>
   <section><h3>Heatmap</h3>
     <select id="heat"><option value="">Off</option><option value="traffic">Traffic (where players walk)</option><option value="kills">Kill zones</option><option value="deaths">Death zones</option><option value="cold">Cold zones (ignored areas)</option></select>
     <div style="height:6px"></div>
@@ -118,12 +119,19 @@ function heatCanvas(){
   for(let i=0;i<d.length;i+=4){const a=Math.min(255,Math.round(Math.pow(d[i+3]/mx,.7)*255)),j=a*4;d[i]=ramp[j];d[i+1]=ramp[j+1];d[i+2]=ramp[j+2];d[i+3]=ramp[j+3]*(a>6?1:a/6)}
   g.putImageData(im,0,0);S.heat=c;S.heatKey=key;return c}
 
+// ---- grid: 8x8 over the whole minimap image, columns A-H left->right, rows 1-8 top->bottom
+const GN=8,cellAt=(x,y,s)=>"ABCDEFGH"[Math.min(GN-1,Math.max(0,x/s*GN|0))]+(Math.min(GN-1,Math.max(0,y/s*GN|0))+1);
+function drawGrid(s){
+  ctx.save();ctx.lineWidth=1;ctx.strokeStyle="rgba(255,255,255,.28)";ctx.fillStyle="rgba(255,255,255,.6)";ctx.font="11px system-ui";ctx.textBaseline="top";
+  for(let i=0;i<=GN;i++){const v=i*s/GN;ctx.beginPath();ctx.moveTo(v,0);ctx.lineTo(v,s);ctx.moveTo(0,v);ctx.lineTo(s,v);ctx.stroke()}
+  for(let r=0;r<GN;r++)for(let c=0;c<GN;c++)ctx.fillText("ABCDEFGH"[c]+(r+1),c*s/GN+4,r*s/GN+3);
+  ctx.restore()}
 // ---- main draw
 function draw(){
   const s=S.size,m=single(),T=m?S.T:Infinity,all=!m; if(!S.img)return;
   ctx.clearRect(0,0,s,s);ctx.drawImage(S.img,0,0,s,s);
   const hc=heatCanvas(),agg=hc&&all;if(hc){ctx.fillStyle="#0007";ctx.fillRect(0,0,s,s);ctx.drawImage(hc,0,0,s,s)}
-  const P=v=>v/Q*s;
+  const P=v=>v/Q*s;if($("grid").checked)drawGrid(s);
   ctx.globalAlpha=agg?.25:1;if($("paths").checked){
     for(const mm of selMatches())for(const p of mm.players){if(!(p.bot?$("showB").checked:$("showH").checked))continue;
       ctx.beginPath();ctx.setLineDash(p.bot?[6,4]:[]);ctx.lineWidth=all?1:p.bot?1.6:2.4;
@@ -146,9 +154,10 @@ function draw(){
 cv.addEventListener("mousemove",ev=>{
   const r=cv.getBoundingClientRect(),x=ev.clientX-r.left,y=ev.clientY-r.top;let best=null,bd=100;
   for(const h of S.hit||[]){const d=(h[0]-x)**2+(h[1]-y)**2;if(d<bd){bd=d;best=h}}
-  const tip=$("tip");if(!best){tip.style.display="none";return}
-  const e=best[2];tip.textContent=(e[5]?"Bot · ":"Human · ")+EVN[e[1]]+" · "+fmt(e[0]);
-  tip.style.display="block";tip.style.left=(cv.offsetLeft+best[0]+12)+"px";tip.style.top=(cv.offsetTop+best[1]-8)+"px"});
+  const tip=$("tip"),g=$("grid").checked,cell=g?" · cell "+cellAt(x,y,S.size):"";
+  if(!best&&!g){tip.style.display="none";return}
+  if(best){const e=best[2];tip.textContent=(e[5]?"Bot · ":"Human · ")+EVN[e[1]]+" · "+fmt(e[0])+cell}else tip.textContent="Cell "+cellAt(x,y,S.size);
+  const px=best?best[0]:x,py=best?best[1]:y;tip.style.display="block";tip.style.left=(cv.offsetLeft+px+12)+"px";tip.style.top=(cv.offsetTop+py-8)+"px"});
 cv.addEventListener("mouseleave",()=>$("tip").style.display="none");
 
 // ---- controls
@@ -156,7 +165,7 @@ $("tabs").innerHTML=MAPS.map(m=>`<button data-m="${m}">${NAMES[m]}</button>`).jo
 $("tabs").onclick=e=>e.target.dataset.m&&loadMap(e.target.dataset.m);
 $("day").onchange=e=>{S.day=e.target.value;fillMatches();update(true)};
 $("match").onchange=e=>{S.match=e.target.value;update(true)};
-["paths","e0","e1","e4","e5","heat","scope","showH","showB"].forEach(id=>$(id).onchange=()=>{S.heatKey="";draw();stats()});
+["paths","e0","e1","e4","e5","grid","heat","scope","showH","showB"].forEach(id=>$(id).onchange=()=>{S.heatKey="";draw();stats()});
 $("mf").onchange=()=>{fillMatches();update(true)};
 $("scrub").oninput=e=>{S.T=+e.target.value;draw()};
 $("play").onclick=()=>{const m=single();if(!m)return;if(S.T>=m.dur)S.T=0;S.playing=!S.playing;$("play").textContent=S.playing?"❚❚ Pause":"▶ Play"};
