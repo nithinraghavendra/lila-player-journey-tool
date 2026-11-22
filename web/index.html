@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LILA BLACK · Player Journey Tool</title>
+<style>
+:root{--bg:#0e1116;--panel:#171b22;--line:#2a313c;--fg:#e6e9ef;--mut:#8b94a3;--human:#35e0ff;--bot:#ffb02e;--acc:#6ea8ff}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;display:grid;grid-template-columns:300px 1fr;grid-template-rows:auto 1fr}
+header{grid-column:1/3;display:flex;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
+header b{letter-spacing:.06em}.tabs{display:flex;gap:6px}
+button,select{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
+button.on{background:var(--acc);color:#07101f;border-color:var(--acc)}
+aside{padding:14px;border-right:1px solid var(--line);overflow:auto;display:flex;flex-direction:column;gap:14px}
+aside h3{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut)}
+aside select{width:100%}label{display:flex;align-items:center;gap:8px;margin:3px 0;cursor:pointer}
+.sw{width:14px;height:14px;display:inline-block;flex:none;text-align:center;font-size:12px;line-height:14px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:6px}.stats div{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.stats b{display:block;font-size:18px}.stats span{color:var(--mut);font-size:11px}
+main{position:relative;display:flex;flex-direction:column;min-height:0}
+#stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative}
+canvas{background:#000;border-radius:8px;max-width:100%}
+#tip{position:absolute;pointer-events:none;background:#000d;border:1px solid var(--line);padding:4px 8px;border-radius:6px;font-size:12px;display:none;white-space:nowrap}
+#bar{display:flex;gap:10px;align-items:center;padding:10px 16px;border-top:1px solid var(--line)}
+#bar input{flex:1}#bar span{font-variant-numeric:tabular-nums;min-width:96px;text-align:right;color:var(--mut)}
+.note{color:var(--mut);font-size:12px}
+@media(max-width:760px){body{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}header{grid-column:1}aside{border-right:0;border-bottom:1px solid var(--line);max-height:42vh}}
+</style></head><body>
+<header><b>LILA BLACK · PLAYER JOURNEYS</b><div class="tabs" id="tabs"></div><span class="note" id="status"></span></header>
+<aside>
+  <section><h3>Filter</h3>
+    <select id="day"></select><div style="height:6px"></div><select id="match"></select>
+    <div class="note" style="margin-top:6px" id="matchNote"></div></section>
+  <section><h3>Show</h3>
+    <label><input type="checkbox" id="paths" checked> Paths</label>
+    <label><input type="checkbox" id="e0" checked><span class="sw" style="color:#ff4d4d">⊕</span> Kills</label>
+    <label><input type="checkbox" id="e1" checked><span class="sw" style="color:#fff">✕</span> Deaths (by player / bot)</label>
+    <label><input type="checkbox" id="e4" checked><span class="sw" style="color:#c26bff">ϟ</span> Storm deaths</label>
+    <label><input type="checkbox" id="e5"><span class="sw" style="color:#ffd24d">◆</span> Loot</label></section>
+  <section><h3>Heatmap</h3>
+    <select id="heat"><option value="">Off</option><option value="traffic">Traffic (where players walk)</option><option value="kills">Kill zones</option><option value="deaths">Death zones</option></select>
+    <div style="height:6px"></div>
+    <select id="scope"><option value="sel">Current filter (map + day + match)</option><option value="all">All matches on this map</option></select></section>
+  <section><h3>Legend</h3>
+    <label><span class="sw" style="background:var(--human);border-radius:50%"></span> Human — solid line</label>
+    <label><span class="sw" style="background:var(--bot)"></span> Bot — dashed line</label></section>
+  <section><h3>In view</h3><div class="stats" id="stats"></div></section>
+  <p class="note">Tip: hover a marker for details. Playback works on a single match; pick “All matches” to see aggregate traces.</p>
+</aside>
+<main><div id="stage"><canvas id="cv"></canvas><div id="tip"></div></div>
+  <div id="bar"><button id="play">▶ Play</button><select id="speed"><option>5</option><option selected>15</option><option>40</option></select>
+  <input type="range" id="scrub" min="0" max="1" value="0" step="1"><span id="clock">0:00 / 0:00</span></div></main>
+<script>
+const MAPS=["AmbroseValley","GrandRift","Lockdown"], NAMES={AmbroseValley:"Ambrose Valley",GrandRift:"Grand Rift",Lockdown:"Lockdown"};
+const Q=4095, $=id=>document.getElementById(id);
+const EVN=["Killed a human","Killed by a human","Killed a bot","Killed by a bot","Died to the storm","Looted"];
+const cache={}, S={map:null,data:null,img:null,day:"",match:"",T:0,playing:false,size:700,heat:null,heatKey:""};
+const cv=$("cv"), ctx=cv.getContext("2d");
+const fmt=s=>Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0");
+
+async function loadMap(m){
+  S.map=m; $("status").textContent="Loading "+NAMES[m]+"…";
+  if(!cache[m]){const [d,img]=await Promise.all([fetch(`data/${m}.json`).then(r=>r.json()),new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=`maps/${m}.jpg`})]);cache[m]={d,img}}
+  S.data=cache[m].d; S.img=cache[m].img; S.day=""; S.match="";
+  $("day").innerHTML='<option value="">All days</option>'+S.data.days.map(d=>`<option>${d}</option>`).join("");
+  fillMatches(); document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.m==m));
+  $("status").textContent=S.data.matches.length+" matches · "+NAMES[m]; update(true);
+}
+const counts=m=>({h:m.players.filter(p=>!p.bot).length,b:m.players.filter(p=>p.bot).length,k:m.ev.filter(e=>e[1]==0||e[1]==2).length,d:m.ev.filter(e=>e[1]==1||e[1]==3||e[1]==4).length});
+function visibleMatches(){return S.data.matches.filter(m=>!S.day||m.day==S.day)}
+function fillMatches(){
+  const ms=visibleMatches();
+  $("match").innerHTML=`<option value="">All matches (${ms.length})</option>`+ms.map(m=>{const c=counts(m);return `<option value="${m.id}">${m.day} · ${fmt(m.dur)} · ${c.h}H ${c.b}B · ${c.k}K ${c.d}D · #${m.id}</option>`}).join("");
+  const first=ms.find(m=>m.players.some(p=>p.bot))||ms[0]; S.match=first?first.id:""; $("match").value=S.match;
+}
+function selMatches(){const ms=visibleMatches();return S.match?ms.filter(m=>m.id==S.match):ms}
+function single(){return S.match?selMatches()[0]:null}
+
+function update(resetT){
+  const m=single(); $("scrub").disabled=$("play").disabled=!m;
+  if(resetT){S.T=m?m.dur:0;S.playing=false;$("play").textContent="▶ Play"}
+  $("scrub").max=m?m.dur:1; $("scrub").value=S.T;
+  $("matchNote").textContent=m?(m.players.some(p=>p.bot)?"":"No bot movement was recorded for this match (bot kills/deaths still show)."):"Showing every match for the filter — playback off.";
+  S.heatKey=""; draw(); stats();
+}
+function stats(){
+  const ms=selMatches(), ev=ms.flatMap(m=>m.ev), n=t=>ev.filter(e=>t.includes(e[1])).length;
+  const h=ms.reduce((a,m)=>a+m.players.filter(p=>!p.bot).length,0), b=ms.reduce((a,m)=>a+m.players.filter(p=>p.bot).length,0);
+  $("stats").innerHTML=[[ms.length,"matches"],[h,"humans"],[b,"bots tracked"],[n([0,2]),"kills"],[n([1,3]),"deaths"],[n([4]),"storm deaths"]].map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join("");
+}
+function resize(){const st=$("stage"),s=Math.max(300,Math.min(st.clientWidth-16,st.clientHeight-16));S.size=s;const d=devicePixelRatio||1;cv.width=cv.height=s*d;cv.style.width=cv.style.height=s+"px";ctx.setTransform(d,0,0,d,0,0);S.heatKey="";draw()}
+
+// ---- heatmap: blob sprite -> alpha accumulation -> colour ramp
+const sprite=(()=>{const c=document.createElement("canvas");c.width=c.height=64;const g=c.getContext("2d"),gr=g.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,"rgba(0,0,0,1)");gr.addColorStop(1,"rgba(0,0,0,0)");g.fillStyle=gr;g.fillRect(0,0,64,64);return c})();
+const ramp=(()=>{const c=document.createElement("canvas");c.width=256;c.height=1;const g=c.getContext("2d"),gr=g.createLinearGradient(0,0,256,0);[[0,"rgba(30,60,255,0)"],[.25,"rgba(40,160,255,.75)"],[.5,"rgba(60,230,120,.85)"],[.75,"rgba(255,220,40,.92)"],[1,"rgba(255,50,40,1)"]].forEach(([o,col])=>gr.addColorStop(o,col));g.fillStyle=gr;g.fillRect(0,0,256,1);return g.getImageData(0,0,256,1).data})();
+function heatPoints(kind){
+  const pts=[];for(const m of (($("scope").value=="all")?visibleMatches():selMatches())){
+    if(kind=="traffic"){for(const p of m.players)for(let i=0;i<p.pts.length;i+=3)pts.push(p.pts[i+1],p.pts[i+2])}
+    else for(const e of m.ev)if(kind=="kills"?(e[1]==0||e[1]==2):(e[1]==1||e[1]==3||e[1]==4))pts.push(e[2],e[3])}
+  return pts}
+function heatCanvas(){
+  const kind=$("heat").value; if(!kind)return null;
+  const key=[S.map,S.day,S.match,kind,$("scope").value,S.size].join("|"); if(S.heatKey==key)return S.heat;
+  const s=S.size,c=document.createElement("canvas");c.width=c.height=s;const g=c.getContext("2d"),pts=heatPoints(kind),r=s*(kind=="traffic"?.02:.035);
+  g.globalAlpha=Math.min(.5,Math.max(.06,40/Math.sqrt(pts.length+1)*.1));
+  for(let i=0;i<pts.length;i+=2)g.drawImage(sprite,pts[i]/Q*s-r,pts[i+1]/Q*s-r,2*r,2*r);
+  const im=g.getImageData(0,0,s,s),d=im.data;let mx=1;for(let i=3;i<d.length;i+=4)if(d[i]>mx)mx=d[i];
+  for(let i=0;i<d.length;i+=4){const a=Math.min(255,Math.round(Math.pow(d[i+3]/mx,.7)*255)),j=a*4;d[i]=ramp[j];d[i+1]=ramp[j+1];d[i+2]=ramp[j+2];d[i+3]=ramp[j+3]*(a>6?1:a/6)}
+  g.putImageData(im,0,0);S.heat=c;S.heatKey=key;return c}
+
+// ---- main draw
+function draw(){
+  const s=S.size,m=single(),T=m?S.T:Infinity,all=!m; if(!S.img)return;
+  ctx.clearRect(0,0,s,s);ctx.drawImage(S.img,0,0,s,s);
+  const hc=heatCanvas(),agg=hc&&all;if(hc){ctx.fillStyle="#0007";ctx.fillRect(0,0,s,s);ctx.drawImage(hc,0,0,s,s)}
+  const P=v=>v/Q*s;
+  ctx.globalAlpha=agg?.25:1;if($("paths").checked){
+    for(const mm of selMatches())for(const p of mm.players){
+      ctx.beginPath();ctx.setLineDash(p.bot?[6,4]:[]);ctx.lineWidth=all?1:p.bot?1.6:2.4;
+      ctx.strokeStyle=p.bot?(all?"rgba(255,176,46,.28)":"rgba(255,176,46,.85)"):(all?"rgba(53,224,255,.28)":"rgba(53,224,255,.95)");
+      let started=false,last=null;
+      for(let i=0;i<p.pts.length;i+=3){if(p.pts[i]>T)break;const x=P(p.pts[i+1]),y=P(p.pts[i+2]);started?ctx.lineTo(x,y):(ctx.moveTo(x,y),started=true);last=[x,y]}
+      ctx.stroke();ctx.setLineDash([]);
+      if(!all&&last){ctx.fillStyle=p.bot?"#ffb02e":"#35e0ff";ctx.strokeStyle="#000";ctx.lineWidth=1.5;
+        p.bot?(ctx.fillRect(last[0]-4,last[1]-4,8,8),ctx.strokeRect(last[0]-4,last[1]-4,8,8)):(ctx.beginPath(),ctx.arc(last[0],last[1],5,0,7),ctx.fill(),ctx.stroke())}}}
+  ctx.globalAlpha=1;S.hit=[];const sz=all?3.5:7;
+  for(const mm of agg?[]:selMatches())for(const e of mm.ev){
+    const [t,k,a,b]=e;if(t>T||!$("e"+(k==2?0:k==3?1:k)).checked)continue;const x=P(a),y=P(b);S.hit.push([x,y,e]);
+    ctx.lineWidth=all?1.2:2;
+    if(k==0||k==2){ctx.strokeStyle="#ff4d4d";ctx.beginPath();ctx.arc(x,y,sz,0,7);ctx.moveTo(x-sz-2,y);ctx.lineTo(x+sz+2,y);ctx.moveTo(x,y-sz-2);ctx.lineTo(x,y+sz+2);ctx.stroke()}
+    else if(k==1||k==3){ctx.strokeStyle="#fff";ctx.beginPath();ctx.moveTo(x-sz,y-sz);ctx.lineTo(x+sz,y+sz);ctx.moveTo(x+sz,y-sz);ctx.lineTo(x-sz,y+sz);ctx.stroke()}
+    else if(k==4){ctx.fillStyle="#c26bff";ctx.strokeStyle="#fff";ctx.beginPath();ctx.moveTo(x+sz*.3,y-sz*1.5);ctx.lineTo(x-sz,y+sz*.2);ctx.lineTo(x,y+sz*.2);ctx.lineTo(x-sz*.3,y+sz*1.5);ctx.lineTo(x+sz,y-sz*.2);ctx.lineTo(x,y-sz*.2);ctx.closePath();ctx.fill();ctx.stroke()}
+    else{ctx.fillStyle="#ffd24d";ctx.beginPath();ctx.moveTo(x,y-sz*.8);ctx.lineTo(x+sz*.8,y);ctx.lineTo(x,y+sz*.8);ctx.lineTo(x-sz*.8,y);ctx.closePath();ctx.fill()}}
+  $("clock").textContent=m?fmt(S.T)+" / "+fmt(m.dur):"—";
+}
+cv.addEventListener("mousemove",ev=>{
+  const r=cv.getBoundingClientRect(),x=ev.clientX-r.left,y=ev.clientY-r.top;let best=null,bd=100;
+  for(const h of S.hit||[]){const d=(h[0]-x)**2+(h[1]-y)**2;if(d<bd){bd=d;best=h}}
+  const tip=$("tip");if(!best){tip.style.display="none";return}
+  const e=best[2];tip.textContent=(e[5]?"Bot · ":"Human · ")+EVN[e[1]]+" · "+fmt(e[0]);
+  tip.style.display="block";tip.style.left=(cv.offsetLeft+best[0]+12)+"px";tip.style.top=(cv.offsetTop+best[1]-8)+"px"});
+cv.addEventListener("mouseleave",()=>$("tip").style.display="none");
+
+// ---- controls
+$("tabs").innerHTML=MAPS.map(m=>`<button data-m="${m}">${NAMES[m]}</button>`).join("");
+$("tabs").onclick=e=>e.target.dataset.m&&loadMap(e.target.dataset.m);
+$("day").onchange=e=>{S.day=e.target.value;fillMatches();update(true)};
+$("match").onchange=e=>{S.match=e.target.value;update(true)};
+["paths","e0","e1","e4","e5","heat","scope"].forEach(id=>$(id).onchange=()=>{S.heatKey="";draw()});
+$("scrub").oninput=e=>{S.T=+e.target.value;draw()};
+$("play").onclick=()=>{const m=single();if(!m)return;if(S.T>=m.dur)S.T=0;S.playing=!S.playing;$("play").textContent=S.playing?"❚❚ Pause":"▶ Play"};
+let prev=0;(function tick(t){const m=single();if(S.playing&&m){S.T=Math.min(m.dur,S.T+(t-prev)/1000*$("speed").value);$("scrub").value=S.T;if(S.T>=m.dur){S.playing=false;$("play").textContent="▶ Play"}draw()}prev=t;requestAnimationFrame(tick)})(0);
+addEventListener("resize",resize);resize();loadMap("AmbroseValley");
+</script></body></html>
