@@ -4,8 +4,6 @@ A browser tool for Level Designers to see how players move, fight, loot and die 
 
 **Live tool:** https://lila-player-journey-tool-web.vercel.app
 
-**Walkthrough video:** (link added before submission)
-
 **Docs:** [ARCHITECTURE.md](ARCHITECTURE.md) · [INSIGHTS.md](INSIGHTS.md)
 
 ## What you can do
