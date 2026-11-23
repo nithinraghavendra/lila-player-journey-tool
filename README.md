@@ -2,7 +2,7 @@
 
 A browser tool for Level Designers to see how players move, fight, loot and die on the three LILA BLACK maps, built from 5 days of production telemetry (Feb 10–14, 2026).
 
-**Live tool:** <PASTE-LIVE-URL-HERE>
+**Live tool:*https://lila-player-journey-tool-web.vercel.app/* <PASTE-LIVE-URL-HERE>
 **Walkthrough video:** <PASTE-LINK-OR-FILE-PATH-HERE>
 **Docs:** [ARCHITECTURE.md](ARCHITECTURE.md) · [INSIGHTS.md](INSIGHTS.md)
 
